@@ -1,9 +1,8 @@
 from pathlib import Path
 
-from project import *
+from project.common import *
 import torch.nn as nn
 from torchvision.models import vgg
-from torch.nn.functional import relu, pad
 
 
 def normalize(x, mean, std):

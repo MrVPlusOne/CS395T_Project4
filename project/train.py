@@ -1,11 +1,10 @@
-import random
-from torch.utils.data import DataLoader, Dataset, SubsetRandomSampler
 from itertools import chain, islice
-from torch import Tensor
-from project.segModel import *
+from torch.utils.data import DataLoader
 from project.data import *
+from project.segModel import *
 
 # %% load data
+print("Training initialization...")
 
 dataFolder = "../ImageNet"
 
@@ -26,7 +25,7 @@ devSet: DataLoader
 trainSet, devSet = getDataSet()
 
 # %% initialize model
-model = makeModel()
+model: SegModel = makeModel()
 lossModel = torch.nn.CrossEntropyLoss()
 allParams = chain(model.parameters())
 optimizer = torch.optim.Adam(allParams, lr=1e-5, weight_decay=1e-6)
@@ -41,6 +40,7 @@ from torch.utils.tensorboard import SummaryWriter
 def trainOnBatch(img: Tensor, label: Tensor) -> np.array:
     img = toDevice(img)
     label = toDevice(label)
+    model.train(True)
     out = model.forward(img)
     loss = lossModel(out, label)
     optimizer.zero_grad()
@@ -53,6 +53,7 @@ def testOnBatch(img: Tensor, label: Tensor) -> np.array:
     with torch.no_grad():
         img = toDevice(img)
         label = toDevice(label)
+        model.train(False)
         out = model.forward(img)
         loss = lossModel(out, label)
         return toNumpy(loss)
@@ -63,12 +64,11 @@ validWriter = SummaryWriter(comment="valid", flush_secs=30)
 
 trainBatches = 2 if testMode else len(trainSet)
 testBatches = 1 if testMode else len(devSet)
-print("train/dev size: {}/{}".format(trainBatches, testBatches))
+# print("train/dev size: {}/{}".format(trainBatches, testBatches))
 
 # %% test on sample images
 from PIL import Image
 from pathlib import Path
-from val_grader.grader import *
 
 colorMap = makeColorMap(Path("../MSRC"))
 
@@ -78,17 +78,17 @@ def logitsToColor(logits: Tensor) -> Tensor:
     return colorMap[indicies, :].permute([0, 3, 1, 2])
 
 
-def testOnSample(fromDir: Path, toDir: Path, epoch: int):
+def testOnSample(fromDir: Path, epoch: int):
+    model.train(False)
     with torch.no_grad():
         for img_path in fromDir.glob('*.bmp'):
             img = Image.open(img_path)
             img = toDevice(transform(img)[None, :, :, :])
             output = logitsToColor(model(img)).squeeze(dim=0).cpu()
 
-            printShape(output, "output of color")
             validWriter.add_image(img_path.name, output, epoch)
-            output = invTransform(output)
-            output.save("{}/{}".format(toDir, img_path.name), "JPEG")
+            # output = invTransform(output)
+            # output.save("{}/{}".format(toDir, img_path.name.replace(".bmp", ".jpg")), "JPEG")
 
 
 def showAtSamePlace(content):
@@ -106,7 +106,6 @@ def trainingLoop():
     step = 0
     for epoch in range(0, 5001):
         print("===epoch {}===".format(epoch))
-        print("test")
         progress = 0
         for inputs, labels in islice(trainSet, trainBatches):
             loss = trainOnBatch(inputs, labels)
@@ -127,10 +126,11 @@ def trainingLoop():
         avgLoss = np.mean(np.concatenate(lossCollection, axis=0))
         validWriter.add_scalar("Loss", avgLoss, step)
 
-        if epoch % 50 == 0:
+        testOnSample(Path("data/images"), epoch)
+
+        if epoch % 40 == 0:
             saveDir = Path("saves/{}/epoch{}".format(formatDate(startTime), epoch))
             saveDir.mkdir(parents=True)
-            testOnSample(Path("data/images"), saveDir, epoch)
             torch.save(model.state_dict(), '{}/state_dict.pth'.format(str(saveDir)))
             # grade()
 
