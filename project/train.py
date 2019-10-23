@@ -28,7 +28,7 @@ trainSet, devSet = getDataSet()
 
 # %% initialize model
 model = makeModel()
-lossModel = torch.nn.L1Loss()
+lossModel = torch.nn.CrossEntropyLoss()
 allParams = chain(model.parameters())
 optimizer = torch.optim.Adam(allParams, lr=1e-4, weight_decay=1e-5)
 
@@ -37,25 +37,29 @@ import datetime
 from torch.utils.tensorboard import SummaryWriter
 
 
-def trainOnBatch(img: Tensor, sigma: Tensor) -> np.array:
-    img: Tensor = toDevice(img)
-    out = model.forward(img, sigma)
-    loss = lossModel(out, img)
+def trainOnBatch(img: Tensor, label: Tensor) -> np.array:
+    img = toDevice(img)
+    out = model.forward(img)
+    loss = lossModel(out, label)
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
     return toNumpy(loss)
 
 
-def testOnBatch(img: Tensor, sigma: Tensor) -> np.array:
-    pass
+def testOnBatch(img: Tensor, label: Tensor) -> np.array:
+    with torch.no_grad():
+        img = toDevice(img)
+        out = model.forward(img)
+        loss = lossModel(out, label)
+        return toNumpy(loss)
 
 
 trainWriter = SummaryWriter(comment="train", flush_secs=30)
 validWriter = SummaryWriter(comment="valid", flush_secs=30)
 
 trainBatches = 2 if testMode else min(len(trainSet), 200)
-testBatches = 1 if testMode else min(len(devSet), 10)
+testBatches = 1 if testMode else min(len(devSet), 50)
 print("train/dev size: {}/{}".format(trainBatches, testBatches))
 
 # %% test on sample images
@@ -63,26 +67,23 @@ from PIL import Image
 from pathlib import Path
 from val_grader.grader import *
 
+colorMap: any
 
-def testOnSample(fromDir: Path, toDir: Path, epoch: int, step: int):
+def logitsToColor(logits: Tensor) -> Tensor:
+    indicies = logits.argmax(dim=1)
+    return colorMap[indicies]  # todo
+
+def testOnSample(fromDir: Path, toDir: Path, epoch: int):
     with torch.no_grad():
         for img_path in fromDir.glob('*.jpg'):
             img = Image.open(img_path)
             img = toDevice(transform(img)[None, :, :, :])
-            output = model.hardEncodeDecode(img)
-            output = torch.clamp(output, 0.0, 1.0).squeeze(dim=0).cpu()
+            output = logitsToColor(model(img)).squeeze(dim=0).cpu()
+
             validWriter.add_image(img_path.name, output, epoch)
             output = invTransform(output)
             output.save("{}/{}".format(toDir, img_path.name), "JPEG")
 
-
-# not working
-def grade():
-    print('Loading assignment')
-    assignment = load_assignment("project")
-
-    print('Loading grader')
-    grade_all(assignment, verbose=True)
 
 
 def showAtSamePlace(content):
@@ -91,24 +92,15 @@ def showAtSamePlace(content):
     sys.stdout.flush()
 
 
-def sigmaF(step: int) -> Tensor:
-    # x = max(step / 2000.0, 0)
-    # s = 1.0 + x * x
-    x = min(max(step / 8000.0, 0), 15)
-    s = 1.0 + x
-    return torch.scalar_tensor(s, device=device)
-
-
 def trainingLoop():
     startTime = datetime.datetime.now().ctime()
     step = 0
     for epoch in range(1, 5001):
         print("===epoch {}===".format(epoch))
         progress = 0
-        for inputs, _ in islice(trainSet, trainBatches):
-            loss = trainOnBatch(inputs, sigmaF(step))
-            trainWriter.add_scalar("SoftLoss", loss, step)
-            trainWriter.add_scalar("sigma", sigmaF(step), step)
+        for inputs, labels in islice(trainSet, trainBatches):
+            loss = trainOnBatch(inputs, labels)
+            trainWriter.add_scalar("Loss", loss, step)
             progress += 1
             showAtSamePlace("progress: {}/{}".format(progress, trainBatches))
             step += 1
@@ -117,19 +109,18 @@ def trainingLoop():
         print("start testing")
         lossCollection = []
         progress = 0
-        for inputs, _ in islice(devSet, testBatches):
-            lossCollection.append(testOnBatch(inputs, sigmaF(step)).reshape(1, -1))
+        for inputs, labels in islice(devSet, testBatches):
+            lossCollection.append(testOnBatch(inputs, labels).reshape(1, -1))
             progress += 1
             showAtSamePlace("progress: {}/{}".format(progress, testBatches))
         print()
-        avgLoss = np.mean(np.concatenate(lossCollection, axis=0), axis=0)
-        validWriter.add_scalar("SoftLoss", avgLoss[0], step)
-        validWriter.add_scalar("HardLoss", avgLoss[1], step)
+        avgLoss = np.mean(np.concatenate(lossCollection, axis=0))
+        validWriter.add_scalar("Loss", avgLoss, step)
 
         if epoch != 0 and epoch % 5 == 0:
             saveDir = Path("saves/{}/epoch{}".format(startTime, epoch))
             saveDir.mkdir(parents=True)
-            testOnSample(Path("data"), saveDir, epoch, step)
+            testOnSample(Path("data"), saveDir, epoch)
             torch.save(model.state_dict(), '{}/state_dict.pth'.format(str(saveDir)))
             # grade()
 
