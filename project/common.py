@@ -36,3 +36,8 @@ def assertEq(x, y):
 
 def printShape(t: Tensor, name: str):
     print("{} shape: {}".format(name, t.shape))
+
+
+def logitsToColor(colorMap: Tensor, logits: Tensor) -> Tensor:
+    indicies = logits.argmax(dim=1)
+    return colorMap[indicies, :].permute([0, 3, 1, 2])
