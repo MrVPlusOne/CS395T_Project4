@@ -25,7 +25,7 @@ devSet: DataLoader
 trainSet, devSet = getDataSet()
 
 # %% initialize model
-model: SegModel = makeModel()
+model: SegModel = makeModel(useVggWeights=True)
 lossModel = torch.nn.CrossEntropyLoss()
 allParams = chain(model.parameters())
 optimizer = torch.optim.Adam(allParams, lr=1e-5, weight_decay=1e-6)

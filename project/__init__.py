@@ -2,7 +2,7 @@ import numpy as np
 from project.segModel import *
 from project.data import skImageToTensor, makeColorMap
 
-model = makeModel()
+model = makeModel(useVggWeights=False)
 loadModelFromFile(model, Path("trained/state_dict.pth"))
 colorMap = makeColorMap(Path("data"))
 

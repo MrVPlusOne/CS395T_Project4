@@ -12,16 +12,16 @@ def normalize(x, mean, std):
     return (x - (mean[None, :, None, None])) / (std[None, :, None, None])
 
 
-def makeModel():
-    m = SegModel()
+def makeModel(useVggWeights):
+    m = SegModel(useVggWeights)
     toDevice(m)
     return m
 
 
 class SegModel(nn.Module):
-    def __init__(self):
+    def __init__(self, useVggWeights: bool):
         super(SegModel, self).__init__()
-        model = toDevice(vgg.vgg16(pretrained=True))
+        model = toDevice(vgg.vgg16(pretrained=useVggWeights))
         self._features = model.eval().features
         self.vgg_features = self._features._modules.items()
 
@@ -191,6 +191,6 @@ class BilinearConvTranspose2d(nn.ConvTranspose2d):
 
 def loadModelFromFile(model: nn.Module, file: Path):
     print("load model from file: " + str(file))
-    model.load_state_dict(torch.load(file))
+    model.load_state_dict(torch.load(file, map_location=device))
     model.to(device)
     print("model loaded")
